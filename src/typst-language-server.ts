@@ -17,11 +17,20 @@ type PendingRequest = {
 };
 
 export type LanguageServerEvent =
-  | { type: "status"; status: "starting" | "ready" | "unavailable"; message?: string }
+  | {
+      type: "status";
+      status: "starting" | "ready" | "unavailable";
+      message?: string;
+    }
   | { type: "diagnostics"; diagnostics: unknown[] }
   | { type: "highlights"; highlights: TypstHighlight[] };
 
-type TypstHighlight = { line: number; start: number; length: number; type: string };
+type TypstHighlight = {
+  line: number;
+  start: number;
+  length: number;
+  type: string;
+};
 type CompletionItem = {
   label?: string;
   detail?: string;
@@ -74,7 +83,10 @@ export class TypstLanguageServer {
       void this.refreshSemanticTokens(this.version);
       return { available: true as const };
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Tinymist could not be started.";
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Tinymist could not be started.";
       this.emit({ type: "status", status: "unavailable", message });
       return { available: false as const, message };
     }
@@ -84,20 +96,35 @@ export class TypstLanguageServer {
     const synchronized = await this.sync(source);
     if (!synchronized.available || !this.documentUri) return [];
     try {
-      const response = await this.request("textDocument/completion", {
+      const response = (await this.request("textDocument/completion", {
         textDocument: { uri: this.documentUri },
         position: { line, character },
         context: { triggerKind: 1 },
-      }) as CompletionItem[] | { items?: CompletionItem[] } | null;
-      const items = Array.isArray(response) ? response : response?.items ?? [];
-      return items.flatMap((item) => {
-        if (!item.label) return [];
-        const rawInsertText = item.textEdit?.newText ?? item.insertText ?? item.label;
-        const insertText = item.insertTextFormat === 2
-          ? rawInsertText.replace(/\$\{\d+:([^}]*)\}/g, "$1").replace(/\$\d+/g, "")
-          : rawInsertText;
-        return [{ label: item.label, detail: item.detail, kind: item.kind, insertText }];
-      }).slice(0, 200);
+      })) as CompletionItem[] | { items?: CompletionItem[] } | null;
+      const items = Array.isArray(response)
+        ? response
+        : (response?.items ?? []);
+      return items
+        .flatMap((item) => {
+          if (!item.label) return [];
+          const rawInsertText =
+            item.textEdit?.newText ?? item.insertText ?? item.label;
+          const insertText =
+            item.insertTextFormat === 2
+              ? rawInsertText
+                  .replace(/\$\{\d+:([^}]*)\}/g, "$1")
+                  .replace(/\$\d+/g, "")
+              : rawInsertText;
+          return [
+            {
+              label: item.label,
+              detail: item.detail,
+              kind: item.kind,
+              insertText,
+            },
+          ];
+        })
+        .slice(0, 200);
     } catch {
       return [];
     }
@@ -114,7 +141,8 @@ export class TypstLanguageServer {
         child.kill();
       }
     }
-    if (this.directory) await rm(this.directory, { recursive: true, force: true });
+    if (this.directory)
+      await rm(this.directory, { recursive: true, force: true });
     this.directory = undefined;
     this.documentPath = undefined;
     this.documentUri = undefined;
@@ -123,13 +151,17 @@ export class TypstLanguageServer {
   private start() {
     if (this.process) return Promise.resolve();
     if (this.starting) return this.starting;
-    this.starting = this.startProcess().finally(() => { this.starting = undefined; });
+    this.starting = this.startProcess().finally(() => {
+      this.starting = undefined;
+    });
     return this.starting;
   }
 
   private async startProcess() {
     this.emit({ type: "status", status: "starting" });
-    this.directory = await mkdtemp(path.join(process.env.TMPDIR ?? "/tmp", "blocks-tinymist-"));
+    this.directory = await mkdtemp(
+      path.join(process.env.TMPDIR ?? "/tmp", "blocks-tinymist-"),
+    );
     this.documentPath = path.join(this.directory, "document.typ");
     this.documentUri = pathToFileURL(this.documentPath).href;
 
@@ -144,7 +176,11 @@ export class TypstLanguageServer {
     child.on("exit", (code) => {
       if (this.process !== child) return;
       this.process = undefined;
-      this.fail(new Error(`Tinymist exited${code === null ? "" : ` with code ${code}`}.`));
+      this.fail(
+        new Error(
+          `Tinymist exited${code === null ? "" : ` with code ${code}`}.`,
+        ),
+      );
     });
 
     const rootUri = pathToFileURL(this.directory).href;
@@ -160,10 +196,29 @@ export class TypstLanguageServer {
             dynamicRegistration: false,
             requests: { full: true },
             tokenTypes: [
-              "namespace", "type", "class", "enum", "interface", "struct",
-              "typeParameter", "parameter", "variable", "property", "enumMember",
-              "event", "function", "method", "macro", "keyword", "modifier",
-              "comment", "string", "number", "regexp", "operator", "decorator",
+              "namespace",
+              "type",
+              "class",
+              "enum",
+              "interface",
+              "struct",
+              "typeParameter",
+              "parameter",
+              "variable",
+              "property",
+              "enumMember",
+              "event",
+              "function",
+              "method",
+              "macro",
+              "keyword",
+              "modifier",
+              "comment",
+              "string",
+              "number",
+              "regexp",
+              "operator",
+              "decorator",
             ],
             tokenModifiers: [],
             formats: ["relative"],
@@ -173,8 +228,17 @@ export class TypstLanguageServer {
       },
       clientInfo: { name: "Blocks", version: "1.0.0" },
     });
-    const capabilities = (initializeResult as { capabilities?: { semanticTokensProvider?: { legend?: { tokenTypes?: string[] } } } } | undefined)?.capabilities;
-    this.semanticTokenTypes = capabilities?.semanticTokensProvider?.legend?.tokenTypes ?? [];
+    const capabilities = (
+      initializeResult as
+        | {
+            capabilities?: {
+              semanticTokensProvider?: { legend?: { tokenTypes?: string[] } };
+            };
+          }
+        | undefined
+    )?.capabilities;
+    this.semanticTokenTypes =
+      capabilities?.semanticTokensProvider?.legend?.tokenTypes ?? [];
     this.notify("initialized", {});
     this.emit({ type: "status", status: "ready" });
   }
@@ -190,12 +254,17 @@ export class TypstLanguageServer {
 
   private notify(method: string, params?: unknown, child = this.process) {
     if (!child) return;
-    this.send({ jsonrpc: "2.0", method, ...(params === undefined ? {} : { params }) }, child);
+    this.send(
+      { jsonrpc: "2.0", method, ...(params === undefined ? {} : { params }) },
+      child,
+    );
   }
 
   private send(message: object, child: ChildProcessWithoutNullStreams) {
     const body = JSON.stringify(message);
-    child.stdin.write(`Content-Length: ${Buffer.byteLength(body)}\r\n\r\n${body}`);
+    child.stdin.write(
+      `Content-Length: ${Buffer.byteLength(body)}\r\n\r\n${body}`,
+    );
   }
 
   private consume(chunk: Buffer) {
@@ -212,7 +281,9 @@ export class TypstLanguageServer {
       const length = Number(match[1]);
       const bodyStart = headerEnd + 4;
       if (this.output.length < bodyStart + length) return;
-      const body = this.output.subarray(bodyStart, bodyStart + length).toString("utf8");
+      const body = this.output
+        .subarray(bodyStart, bodyStart + length)
+        .toString("utf8");
       this.output = this.output.subarray(bodyStart + length);
       try {
         this.receive(JSON.parse(body) as JsonRpcMessage);
@@ -233,7 +304,8 @@ export class TypstLanguageServer {
     }
 
     if (message.method === "textDocument/publishDiagnostics") {
-      const params = message.params as { uri?: string; diagnostics?: unknown[] } | undefined;
+      const params = message.params as
+        { uri?: string; diagnostics?: unknown[] } | undefined;
       if (params?.uri === this.documentUri) {
         const diagnostics = params?.diagnostics ?? [];
         this.emit({ type: "diagnostics", diagnostics });
@@ -244,16 +316,23 @@ export class TypstLanguageServer {
     // Tinymist occasionally asks clients for configuration. Empty settings use
     // its defaults and keep the protocol moving.
     if (typeof message.id === "number" && message.method) {
-      this.send({ jsonrpc: "2.0", id: message.id, result: message.method === "workspace/configuration" ? [] : null }, this.process!);
+      this.send(
+        {
+          jsonrpc: "2.0",
+          id: message.id,
+          result: message.method === "workspace/configuration" ? [] : null,
+        },
+        this.process!,
+      );
     }
   }
 
   private async refreshSemanticTokens(version: number) {
     if (!this.documentUri || this.semanticTokenTypes.length === 0) return;
     try {
-      const response = await this.request("textDocument/semanticTokens/full", {
+      const response = (await this.request("textDocument/semanticTokens/full", {
         textDocument: { uri: this.documentUri },
-      }) as { data?: number[] } | null;
+      })) as { data?: number[] } | null;
       if (version !== this.version) return;
       const data = response?.data ?? [];
       const highlights: TypstHighlight[] = [];
@@ -279,6 +358,10 @@ export class TypstLanguageServer {
   private fail(error: Error) {
     for (const request of this.pending.values()) request.reject(error);
     this.pending.clear();
-    this.emit({ type: "status", status: "unavailable", message: error.message });
+    this.emit({
+      type: "status",
+      status: "unavailable",
+      message: error.message,
+    });
   }
 }

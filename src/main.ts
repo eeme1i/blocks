@@ -1,7 +1,7 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, Menu } from "electron";
 import type { MenuItemConstructorOptions, WebContents } from "electron";
-import path from 'node:path';
-import started from 'electron-squirrel-startup';
+import path from "node:path";
+import started from "electron-squirrel-startup";
 import { mkdtemp, readFile, rm, writeFile } from "fs/promises";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -19,14 +19,13 @@ type WindowContext = {
 };
 const windowContexts = new Map<number, WindowContext>();
 
-
 const createWindow = () => {
   // Create the browser window.
   const mainWindow = new BrowserWindow({
     width: 1200,
     height: 800,
     webPreferences: {
-      preload: path.join(__dirname, 'preload.js'),
+      preload: path.join(__dirname, "preload.js"),
 
       contextIsolation: true,
       nodeIntegration: false,
@@ -39,7 +38,8 @@ const createWindow = () => {
   const context: WindowContext = {
     filePath: null,
     typstLanguageServer: new TypstLanguageServer((event) => {
-      if (!mainWindow.isDestroyed()) mainWindow.webContents.send("typst:lsp-event", event);
+      if (!mainWindow.isDestroyed())
+        mainWindow.webContents.send("typst:lsp-event", event);
     }),
   };
   windowContexts.set(webContentsId, context);
@@ -80,11 +80,27 @@ function installApplicationMenu() {
     {
       label: "File",
       submenu: [
-        { label: "New Window", accelerator: "CmdOrCtrl+Shift+N", click: createWindow },
+        {
+          label: "New Window",
+          accelerator: "CmdOrCtrl+Shift+N",
+          click: createWindow,
+        },
         { type: "separator" },
-        { label: "Open…", accelerator: "CmdOrCtrl+O", click: () => sendFileCommand("open") },
-        { label: "Save", accelerator: "CmdOrCtrl+S", click: () => sendFileCommand("save") },
-        { label: "Save As…", accelerator: "CmdOrCtrl+Shift+S", click: () => sendFileCommand("save-as") },
+        {
+          label: "Open…",
+          accelerator: "CmdOrCtrl+O",
+          click: () => sendFileCommand("open"),
+        },
+        {
+          label: "Save",
+          accelerator: "CmdOrCtrl+S",
+          click: () => sendFileCommand("save"),
+        },
+        {
+          label: "Save As…",
+          accelerator: "CmdOrCtrl+Shift+S",
+          click: () => sendFileCommand("save-as"),
+        },
         { type: "separator" },
         process.platform === "darwin" ? { role: "close" } : { role: "quit" },
       ],
@@ -110,61 +126,58 @@ function registerDocumentHandlers() {
       filters: [
         {
           name: "Blocks Document",
-          extensions: ["blocks"]
-        }
-      ]
-    })
+          extensions: ["blocks"],
+        },
+      ],
+    });
 
     if (result.canceled) {
-      return null
+      return null;
     }
 
     const filePath = result.filePaths[0];
 
-    const contents = await readFile(filePath, "utf-8")
+    const contents = await readFile(filePath, "utf-8");
     contextFor(event.sender).filePath = filePath;
     owner.setTitle(`${path.basename(filePath)} — blocks`);
 
     return {
       filePath,
-      contents
+      contents,
+    };
+  });
+
+  ipcMain.handle("document:save", async (event, contents: unknown) => {
+    if (typeof contents !== "string") {
+      throw new TypeError("Document contents must be a string");
     }
-  })
 
-  ipcMain.handle(
-      "document:save",
-      async (event, contents: unknown) => {
-        if (typeof contents !== "string") {
-          throw new TypeError("Document contents must be a string");
-        }
+    const context = contextFor(event.sender);
+    if (!context.filePath) {
+      return saveAs(event.sender, contents);
+    }
 
-        const context = contextFor(event.sender);
-        if (!context.filePath) {
-          return saveAs(event.sender, contents);
-        }
-
-        await writeFile(context.filePath, contents, "utf8");
-        BrowserWindow.fromWebContents(event.sender)?.setTitle(`${path.basename(context.filePath)} — blocks`);
-
-        return {
-          filePath: context.filePath,
-        };
-      },
+    await writeFile(context.filePath, contents, "utf8");
+    BrowserWindow.fromWebContents(event.sender)?.setTitle(
+      `${path.basename(context.filePath)} — blocks`,
     );
 
-  ipcMain.handle(
-    "document:save-as",
-    async (event, contents: unknown) => {
-      if (typeof contents !== "string") {
-        throw new TypeError("Document contents must be a string");
-      }
+    return {
+      filePath: context.filePath,
+    };
+  });
 
-      return saveAs(event.sender, contents);
-    },
-  );
+  ipcMain.handle("document:save-as", async (event, contents: unknown) => {
+    if (typeof contents !== "string") {
+      throw new TypeError("Document contents must be a string");
+    }
+
+    return saveAs(event.sender, contents);
+  });
 
   ipcMain.handle("typst:compile", async (_event, source: unknown) => {
-    if (typeof source !== "string") throw new TypeError("Typst source must be a string");
+    if (typeof source !== "string")
+      throw new TypeError("Typst source must be a string");
     try {
       const pdf = await compileTypst(source);
       return { ok: true, pdf: pdf.toString("base64") };
@@ -174,26 +187,40 @@ function registerDocumentHandlers() {
   });
 
   ipcMain.handle("typst:lsp-sync", async (event, source: unknown) => {
-    if (typeof source !== "string") throw new TypeError("Typst source must be a string");
+    if (typeof source !== "string")
+      throw new TypeError("Typst source must be a string");
     return contextFor(event.sender).typstLanguageServer.sync(source);
   });
 
-  ipcMain.handle("typst:lsp-complete", async (event, source: unknown, line: unknown, character: unknown) => {
-    if (typeof source !== "string" || typeof line !== "number" || typeof character !== "number") {
-      throw new TypeError("Invalid Typst completion request");
-    }
-    return contextFor(event.sender).typstLanguageServer.complete(source, line, character);
-  });
+  ipcMain.handle(
+    "typst:lsp-complete",
+    async (event, source: unknown, line: unknown, character: unknown) => {
+      if (
+        typeof source !== "string" ||
+        typeof line !== "number" ||
+        typeof character !== "number"
+      ) {
+        throw new TypeError("Invalid Typst completion request");
+      }
+      return contextFor(event.sender).typstLanguageServer.complete(
+        source,
+        line,
+        character,
+      );
+    },
+  );
 
   ipcMain.handle("typst:export-pdf", async (event, source: unknown) => {
-    if (typeof source !== "string") throw new TypeError("Typst source must be a string");
+    if (typeof source !== "string")
+      throw new TypeError("Typst source must be a string");
     const owner = BrowserWindow.fromWebContents(event.sender);
     if (!owner) throw new Error("This window is no longer available");
     const result = await dialog.showSaveDialog(owner, {
       defaultPath: "Untitled.pdf",
       filters: [{ name: "PDF", extensions: ["pdf"] }],
     });
-    if (result.canceled || !result.filePath) return { ok: false, canceled: true, error: "" };
+    if (result.canceled || !result.filePath)
+      return { ok: false, canceled: true, error: "" };
     try {
       await compileTypst(source, result.filePath);
       return { ok: true, filePath: result.filePath };
@@ -203,7 +230,8 @@ function registerDocumentHandlers() {
   });
 
   ipcMain.handle("typst:export-source", async (event, source: unknown) => {
-    if (typeof source !== "string") throw new TypeError("Typst source must be a string");
+    if (typeof source !== "string")
+      throw new TypeError("Typst source must be a string");
     const owner = BrowserWindow.fromWebContents(event.sender);
     if (!owner) throw new Error("This window is no longer available");
     const result = await dialog.showSaveDialog(owner, {
@@ -217,12 +245,20 @@ function registerDocumentHandlers() {
 }
 
 async function compileTypst(source: string, outputPath?: string) {
-  const tempDirectory = await mkdtemp(path.join(app.getPath("temp"), "blocks-typst-"));
+  const tempDirectory = await mkdtemp(
+    path.join(app.getPath("temp"), "blocks-typst-"),
+  );
   const inputPath = path.join(tempDirectory, "document.typ");
   const pdfPath = outputPath ?? path.join(tempDirectory, "preview.pdf");
   try {
     await writeFile(inputPath, source, "utf8");
-    await execFileAsync("typst", ["compile", "--root", tempDirectory, inputPath, pdfPath]);
+    await execFileAsync("typst", [
+      "compile",
+      "--root",
+      tempDirectory,
+      inputPath,
+      pdfPath,
+    ]);
     return await readFile(pdfPath);
   } finally {
     await rm(tempDirectory, { recursive: true, force: true });
@@ -230,8 +266,13 @@ async function compileTypst(source: string, outputPath?: string) {
 }
 
 function formatTypstError(error: unknown) {
-  if (error && typeof error === "object" && "stderr" in error) return String(error.stderr).trim() || "Typst could not compile this document.";
-  return error instanceof Error ? error.message : "Typst could not compile this document.";
+  if (error && typeof error === "object" && "stderr" in error)
+    return (
+      String(error.stderr).trim() || "Typst could not compile this document."
+    );
+  return error instanceof Error
+    ? error.message
+    : "Typst could not compile this document.";
 }
 
 async function saveAs(webContents: WebContents, contents: string) {
@@ -263,21 +304,20 @@ async function saveAs(webContents: WebContents, contents: string) {
   };
 }
 
-
 // This method will be called when Electron has finished
 // initialization and is ready to create browser windows.
 // Some APIs can only be used after this event occurs.
 app.on("ready", () => {
-  registerDocumentHandlers()
+  registerDocumentHandlers();
   installApplicationMenu();
   createWindow();
-})
+});
 
 // Quit when all windows are closed, except on macOS. There, it's common
 // for applications and their menu bar to stay active until the user quits
 // explicitly with Cmd + Q.
-app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') {
+app.on("window-all-closed", () => {
+  if (process.platform !== "darwin") {
     app.quit();
   }
 });
@@ -288,7 +328,7 @@ app.on("before-quit", () => {
   }
 });
 
-app.on('activate', () => {
+app.on("activate", () => {
   // On OS X it's common to re-create a window in the app when the
   // dock icon is clicked and there are no other windows open.
   if (BrowserWindow.getAllWindows().length === 0) {

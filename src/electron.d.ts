@@ -4,7 +4,9 @@ declare global {
   type OpenDocumentResult = { filePath: string; contents: string };
   type SaveDocumentResult = { filePath: string };
   type CompileResult = { ok: true; pdf: string } | { ok: false; error: string };
-  type ExportResult = { ok: true; filePath: string } | { ok: false; canceled: boolean; error: string };
+  type ExportResult =
+    | { ok: true; filePath: string }
+    | { ok: false; canceled: boolean; error: string };
   type FileCommand = "open" | "save" | "save-as";
   type TypstPosition = { line: number; character: number };
   type TypstDiagnostic = {
@@ -14,10 +16,24 @@ declare global {
     source?: string;
     message: string;
   };
-  type TypstHighlight = { line: number; start: number; length: number; type: string };
-  type TypstCompletion = { label: string; detail?: string; kind?: number; insertText: string };
+  type TypstHighlight = {
+    line: number;
+    start: number;
+    length: number;
+    type: string;
+  };
+  type TypstCompletion = {
+    label: string;
+    detail?: string;
+    kind?: number;
+    insertText: string;
+  };
   type TypstLanguageServerEvent =
-    | { type: "status"; status: "starting" | "ready" | "unavailable"; message?: string }
+    | {
+        type: "status";
+        status: "starting" | "ready" | "unavailable";
+        message?: string;
+      }
     | { type: "diagnostics"; diagnostics: TypstDiagnostic[] }
     | { type: "highlights"; highlights: TypstHighlight[] };
 
@@ -30,9 +46,17 @@ declare global {
       compileTypst(source: string): Promise<CompileResult>;
       exportPdf(source: string): Promise<ExportResult>;
       exportTypst(source: string): Promise<SaveDocumentResult | null>;
-      syncTypstLanguageServer(source: string): Promise<{ available: boolean; message?: string }>;
-      completeTypst(source: string, line: number, character: number): Promise<TypstCompletion[]>;
-      onTypstLanguageServerEvent(callback: (event: TypstLanguageServerEvent) => void): () => void;
+      syncTypstLanguageServer(
+        source: string,
+      ): Promise<{ available: boolean; message?: string }>;
+      completeTypst(
+        source: string,
+        line: number,
+        character: number,
+      ): Promise<TypstCompletion[]>;
+      onTypstLanguageServerEvent(
+        callback: (event: TypstLanguageServerEvent) => void,
+      ): () => void;
       onFileCommand(callback: (command: FileCommand) => void): () => void;
     };
   }
