@@ -336,7 +336,6 @@ export function Board(props: { writer: WriterState }) {
               const size = () => primarySize(block());
               return (
                 <>
-                  {/** biome-ignore lint/a11y/useKeyWithClickEvents: <this is moving a node has to work> */}
                   <article
                     class={`node primary ${props.writer.selected().primaryId === block().id && !props.writer.selected().alternativeId ? "selected" : ""} ${props.writer.diagnosticsByBlock().has(block().id) ? "has-diagnostic" : ""}`}
                     style={{
@@ -445,7 +444,6 @@ export function Board(props: { writer: WriterState }) {
                         );
                       const alternativeDimensions = () =>
                         alternativeSize(alternative());
-                      // biome-ignore lint/a11y/useKeyWithClickEvents: this is moving a node has to work
                       return (
                         <article
                           class={`node alternative ${props.writer.selected().alternativeId === alternative().id ? "selected" : ""}`}
