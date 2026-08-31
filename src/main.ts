@@ -6,6 +6,7 @@ import { mkdtemp, readFile, readdir, rm, writeFile } from "fs/promises";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { TypstLanguageServer } from "./typst-language-server";
+import { tinymistExecutable } from "./tinymist";
 
 // Handle creating/removing shortcuts on Windows when installing/uninstalling.
 if (started) {
@@ -252,7 +253,7 @@ async function compileTypstSvg(source: string) {
   const svgPath = path.join(tempDirectory, "preview-{p}.svg");
   try {
     await writeFile(inputPath, source, "utf8");
-    await execFileAsync("typst", [
+    await execFileAsync(tinymistExecutable(), [
       "compile",
       "--format",
       "svg",
@@ -284,7 +285,7 @@ async function compileTypstPdf(source: string, outputPath: string) {
   const inputPath = path.join(tempDirectory, "document.typ");
   try {
     await writeFile(inputPath, source, "utf8");
-    await execFileAsync("typst", [
+    await execFileAsync(tinymistExecutable(), [
       "compile",
       "--root",
       tempDirectory,

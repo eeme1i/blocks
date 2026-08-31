@@ -92,3 +92,7 @@ dist/
 
 # Electron-Forge
 out/
+
+# Platform binaries staged for Electron packaging
+resources/tools/*/tinymist
+resources/tools/*/tinymist.exe

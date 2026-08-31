@@ -6,10 +6,34 @@ import { MakerRpm } from "@electron-forge/maker-rpm";
 import { VitePlugin } from "@electron-forge/plugin-vite";
 import { FusesPlugin } from "@electron-forge/plugin-fuses";
 import { FuseV1Options, FuseVersion } from "@electron/fuses";
+import { access, constants } from "node:fs/promises";
+import path from "node:path";
+
+function bundledTinymist(platform: string, arch: string) {
+  const executable = platform === "win32" ? "tinymist.exe" : "tinymist";
+  return path.resolve("resources", "tools", `${platform}-${arch}`, executable);
+}
 
 const config: ForgeConfig = {
   packagerConfig: {
     asar: true,
+  },
+  hooks: {
+    prePackage: async (forgeConfig, platform, arch) => {
+      const executable = bundledTinymist(platform, arch);
+      try {
+        await access(
+          executable,
+          platform === "win32" ? constants.F_OK : constants.X_OK,
+        );
+      } catch {
+        throw new Error(
+          `Missing executable: ${executable}\n` +
+            "Run `pnpm tools:stage` before packaging.",
+        );
+      }
+      forgeConfig.packagerConfig.extraResource = [executable];
+    },
   },
   rebuildConfig: {},
   makers: [

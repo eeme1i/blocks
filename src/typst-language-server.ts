@@ -2,6 +2,7 @@ import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
 import { pathToFileURL } from "node:url";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { tinymistExecutable } from "./tinymist";
 
 type JsonRpcMessage = {
   id?: number;
@@ -212,7 +213,9 @@ export class TypstLanguageServer {
     this.documentPath = path.join(this.directory, "document.typ");
     this.documentUri = pathToFileURL(this.documentPath).href;
 
-    const child = spawn("tinymist", ["lsp"], { cwd: this.directory });
+    const child = spawn(tinymistExecutable(), ["lsp"], {
+      cwd: this.directory,
+    });
     this.process = child;
     child.stdout.on("data", (chunk: Buffer) => this.consume(chunk));
     child.stderr.on("data", () => undefined);

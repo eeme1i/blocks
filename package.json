@@ -10,6 +10,7 @@
     "package": "electron-forge package",
     "make": "electron-forge make",
     "publish": "electron-forge publish",
+    "tools:stage": "node scripts/stage-tinymist.mjs",
     "lint": "eslint --ext .ts,.tsx .",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
