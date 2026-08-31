@@ -41,8 +41,38 @@ export function Board(props: { writer: WriterState }) {
     const canvas = canvasElement;
     if (!canvas) return;
     canvas.addEventListener("wheel", wheelBoard, { passive: false });
-    onCleanup(() => canvas.removeEventListener("wheel", wheelBoard));
+    const moveInteraction = (event: PointerEvent) => {
+      if (nodeDrag) dragNode(event);
+      else if (nodeResize) resizeNode(event);
+      else if (boardDrag) panBoard(event);
+    };
+    const endInteraction = () => {
+      boardDrag = undefined;
+      nodeDrag = undefined;
+      nodeResize = undefined;
+      document.body.classList.remove("board-interacting");
+    };
+    window.addEventListener("pointermove", moveInteraction);
+    window.addEventListener("pointerup", endInteraction);
+    window.addEventListener("pointercancel", endInteraction);
+    window.addEventListener("blur", endInteraction);
+    onCleanup(() => {
+      canvas.removeEventListener("wheel", wheelBoard);
+      window.removeEventListener("pointermove", moveInteraction);
+      window.removeEventListener("pointerup", endInteraction);
+      window.removeEventListener("pointercancel", endInteraction);
+      window.removeEventListener("blur", endInteraction);
+      document.body.classList.remove("board-interacting");
+    });
   });
+
+  function beginInteraction() {
+    document.body.classList.add("board-interacting");
+  }
+
+  function finishInteraction() {
+    document.body.classList.remove("board-interacting");
+  }
 
   function beginBoardPan(event: PointerEvent) {
     const target = event.target as HTMLElement;
@@ -55,6 +85,7 @@ export function Board(props: { writer: WriterState }) {
       originX: position.x,
       originY: position.y,
     };
+    beginInteraction();
     (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
   }
 
@@ -70,6 +101,7 @@ export function Board(props: { writer: WriterState }) {
 
   function endBoardPan() {
     boardDrag = undefined;
+    finishInteraction();
   }
 
   function beginNodeDrag(
@@ -91,6 +123,7 @@ export function Board(props: { writer: WriterState }) {
         .document()
         .blocks.findIndex((block) => block.id === primaryId),
     };
+    beginInteraction();
     (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
     props.writer.setSelected({ primaryId, alternativeId });
   }
@@ -121,6 +154,7 @@ export function Board(props: { writer: WriterState }) {
     if (!nodeDrag) return;
     event.stopPropagation();
     nodeDrag = undefined;
+    finishInteraction();
   }
 
   function beginNodeResize(
@@ -139,6 +173,7 @@ export function Board(props: { writer: WriterState }) {
       width: size.width,
       height: size.height,
     };
+    beginInteraction();
     (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
   }
 
@@ -163,6 +198,7 @@ export function Board(props: { writer: WriterState }) {
     if (!nodeResize) return;
     event.stopPropagation();
     nodeResize = undefined;
+    finishInteraction();
   }
 
   function zoomBoard(nextScale: number, anchor?: Point) {
@@ -182,6 +218,11 @@ export function Board(props: { writer: WriterState }) {
   }
 
   function wheelBoard(event: WheelEvent) {
+    if (
+      event.target instanceof Element &&
+      event.target.closest(".autocomplete-menu")
+    )
+      return;
     event.preventDefault();
     if (!event.ctrlKey && !event.metaKey) {
       setView((current) => ({

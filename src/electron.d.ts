@@ -3,7 +3,8 @@ export {};
 declare global {
   type OpenDocumentResult = { filePath: string; contents: string };
   type SaveDocumentResult = { filePath: string };
-  type CompileResult = { ok: true; pdf: string } | { ok: false; error: string };
+  type CompileResult =
+    { ok: true; pages: string[] } | { ok: false; error: string };
   type ExportResult =
     | { ok: true; filePath: string }
     | { ok: false; canceled: boolean; error: string };
@@ -27,6 +28,14 @@ declare global {
     detail?: string;
     kind?: number;
     insertText: string;
+    cursorOffset?: number;
+    edits?: TypstCompletionEdit[];
+  };
+  type TypstCompletionEdit = {
+    range: { start: TypstPosition; end: TypstPosition };
+    newText: string;
+    cursorOffset?: number;
+    primary?: boolean;
   };
   type TypstLanguageServerEvent =
     | {

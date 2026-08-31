@@ -127,9 +127,9 @@ export function Inspector(props: { writer: WriterState }) {
           </div>
         </Show>
         <Show when={props.writer.rightPane() === "preview"}>
-          <div class="pdf-preview">
+          <div class="svg-preview">
             <Show
-              when={props.writer.previewUrl()}
+              when={props.writer.previewPages().length > 0}
               fallback={
                 <div class="preview-empty">
                   <span>Typst preview</span>
@@ -140,10 +140,14 @@ export function Inspector(props: { writer: WriterState }) {
                 </div>
               }
             >
-              <iframe
-                title="Compiled Typst preview"
-                src={props.writer.previewUrl() ?? undefined}
-              />
+              <div class="svg-preview-pages">
+                {props.writer.previewPages().map((page, index) => (
+                  <img
+                    alt={`Compiled Typst preview, page ${index + 1}`}
+                    src={`data:image/svg+xml;base64,${page}`}
+                  />
+                ))}
+              </div>
             </Show>
             <Show when={props.writer.previewState() === "error"}>
               <div class="compile-error">{props.writer.previewError()}</div>

@@ -36,7 +36,7 @@ export function createWriterState() {
   const [selected, setSelected] = createSignal<SelectedBlock>({
     primaryId: starterDocument.blocks[0].id,
   });
-  const [previewUrl, setPreviewUrl] = createSignal<string | null>(null);
+  const [previewPages, setPreviewPages] = createSignal<string[]>([]);
   const [previewState, setPreviewState] = createSignal<PreviewState>("idle");
   const [previewError, setPreviewError] = createSignal("");
   const [rightPane, setRightPane] = createSignal<InspectorPane>("preview");
@@ -207,7 +207,7 @@ export function createWriterState() {
       setDocument(next);
       setSelected({ primaryId: next.blocks[0]?.id ?? "" });
       setFilePath(result.filePath);
-      setPreviewUrl(null);
+      setPreviewPages([]);
     }
   }
 
@@ -465,7 +465,7 @@ export function createWriterState() {
         showToast(result.error || "Could not compile preview", "error");
       return;
     }
-    setPreviewUrl(`data:application/pdf;base64,${result.pdf}`);
+    setPreviewPages(result.pages);
     setPreviewState("idle");
     if (reveal) showToast("Preview compiled");
   }
@@ -487,11 +487,36 @@ export function createWriterState() {
     const firstLineOffset =
       position.line === range.localStartLine ? range.localStartCharacter : 0;
     if (position.character < firstLineOffset) return [];
-    return window.writer.completeTypst(
+    const completions = await window.writer.completeTypst(
       typstSource(),
       range.startLine + position.line - range.localStartLine,
       position.character - firstLineOffset,
     );
+    return completions.map((completion) => ({
+      ...completion,
+      edits: completion.edits?.map((edit) => ({
+        ...edit,
+        range: {
+          start: {
+            line:
+              edit.range.start.line - range.startLine + range.localStartLine,
+            character:
+              edit.range.start.character +
+              (edit.range.start.line === range.startLine
+                ? range.localStartCharacter
+                : 0),
+          },
+          end: {
+            line: edit.range.end.line - range.startLine + range.localStartLine,
+            character:
+              edit.range.end.character +
+              (edit.range.end.line === range.startLine
+                ? range.localStartCharacter
+                : 0),
+          },
+        },
+      })),
+    }));
   }
 
   async function exportPdf() {
@@ -525,7 +550,7 @@ export function createWriterState() {
     setSelected,
     activePrimary,
     typstSource,
-    previewUrl,
+    previewPages,
     previewState,
     previewError,
     rightPane,

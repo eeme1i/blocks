@@ -106,6 +106,7 @@ export function TypstEditor(props: {
 }) {
   let highlightedElement: HTMLPreElement | undefined;
   let textareaElement: HTMLTextAreaElement | undefined;
+  let completionMenuElement: HTMLDivElement | undefined;
   let completionTimer: number | undefined;
   let completionRequest = 0;
   const [completions, setCompletions] = createSignal<TypstCompletion[]>([]);
@@ -226,9 +227,7 @@ export function TypstEditor(props: {
         return;
       const seen = new Set<string>();
       setCompletions(
-        items
-          .filter((item) => !seen.has(item.label) && seen.add(item.label))
-          .slice(0, 8),
+        items.filter((item) => !seen.has(item.label) && seen.add(item.label)),
       );
       setActiveCompletion(0);
       locateMenu(textarea);
@@ -238,16 +237,43 @@ export function TypstEditor(props: {
   function acceptCompletion(item: TypstCompletion) {
     const textarea = textareaElement;
     if (!textarea) return;
-    const range = wordRange(textarea.value, textarea.selectionStart);
-    const start =
-      range.prefix.startsWith("#") && !item.insertText.startsWith("#")
-        ? range.start + 1
-        : range.start;
-    const next =
-      textarea.value.slice(0, start) +
-      item.insertText +
-      textarea.value.slice(range.end);
-    const cursor = start + item.insertText.length;
+    let next: string;
+    let cursor: number;
+    if (item.edits?.length) {
+      next = textarea.value;
+      const offsetAt = (position: TypstPosition) => {
+        const lines = textarea.value.split("\n");
+        let offset = 0;
+        for (let line = 0; line < position.line; line += 1)
+          offset += (lines[line]?.length ?? 0) + 1;
+        return offset + position.character;
+      };
+      const edits = item.edits
+        .map((edit) => ({
+          ...edit,
+          start: offsetAt(edit.range.start),
+          end: offsetAt(edit.range.end),
+        }))
+        .sort((left, right) => right.start - left.start);
+      const primary = edits.find((edit) => edit.primary) ?? edits[0];
+      cursor = primary.start + (primary.cursorOffset ?? primary.newText.length);
+      for (const edit of edits) {
+        if (edit !== primary && edit.start < primary.start)
+          cursor += edit.newText.length - (edit.end - edit.start);
+        next = next.slice(0, edit.start) + edit.newText + next.slice(edit.end);
+      }
+    } else {
+      const range = wordRange(textarea.value, textarea.selectionStart);
+      const start =
+        range.prefix.startsWith("#") && !item.insertText.startsWith("#")
+          ? range.start + 1
+          : range.start;
+      next =
+        textarea.value.slice(0, start) +
+        item.insertText +
+        textarea.value.slice(range.end);
+      cursor = start + (item.cursorOffset ?? item.insertText.length);
+    }
     textarea.value = next;
     props.onInput(next);
     setCompletions([]);
@@ -263,9 +289,23 @@ export function TypstEditor(props: {
     if (event.key === "ArrowDown" || event.key === "ArrowUp") {
       event.preventDefault();
       const direction = event.key === "ArrowDown" ? 1 : -1;
-      setActiveCompletion(
-        (current) => (current + direction + items.length) % items.length,
-      );
+      const next =
+        (activeCompletion() + direction + items.length) % items.length;
+      setActiveCompletion(next);
+      queueMicrotask(() => {
+        const menu = completionMenuElement;
+        const button = menu?.querySelectorAll("button")[next];
+        if (!menu || !button) return;
+        if (button.offsetTop < menu.scrollTop) {
+          menu.scrollTop = button.offsetTop;
+        } else if (
+          button.offsetTop + button.offsetHeight >
+          menu.scrollTop + menu.clientHeight
+        ) {
+          menu.scrollTop =
+            button.offsetTop + button.offsetHeight - menu.clientHeight;
+        }
+      });
     } else if (event.key === "Enter" || event.key === "Tab") {
       event.preventDefault();
       acceptCompletion(items[activeCompletion()]);
@@ -302,6 +342,7 @@ export function TypstEditor(props: {
       />
       <Show when={completions().length > 0}>
         <div
+          ref={completionMenuElement}
           class="autocomplete-menu"
           style={{
             left: `${menuPosition().left}px`,

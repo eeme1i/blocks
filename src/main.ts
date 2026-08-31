@@ -2,7 +2,7 @@ import { app, BrowserWindow, dialog, ipcMain, Menu } from "electron";
 import type { MenuItemConstructorOptions, WebContents } from "electron";
 import path from "node:path";
 import started from "electron-squirrel-startup";
-import { mkdtemp, readFile, rm, writeFile } from "fs/promises";
+import { mkdtemp, readFile, readdir, rm, writeFile } from "fs/promises";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { TypstLanguageServer } from "./typst-language-server";
@@ -179,8 +179,8 @@ function registerDocumentHandlers() {
     if (typeof source !== "string")
       throw new TypeError("Typst source must be a string");
     try {
-      const pdf = await compileTypst(source);
-      return { ok: true, pdf: pdf.toString("base64") };
+      const pages = await compileTypstSvg(source);
+      return { ok: true, pages };
     } catch (error) {
       return { ok: false, error: formatTypstError(error) };
     }
@@ -222,7 +222,7 @@ function registerDocumentHandlers() {
     if (result.canceled || !result.filePath)
       return { ok: false, canceled: true, error: "" };
     try {
-      await compileTypst(source, result.filePath);
+      await compileTypstPdf(source, result.filePath);
       return { ok: true, filePath: result.filePath };
     } catch (error) {
       return { ok: false, canceled: false, error: formatTypstError(error) };
@@ -244,12 +244,44 @@ function registerDocumentHandlers() {
   });
 }
 
-async function compileTypst(source: string, outputPath?: string) {
+async function compileTypstSvg(source: string) {
   const tempDirectory = await mkdtemp(
     path.join(app.getPath("temp"), "blocks-typst-"),
   );
   const inputPath = path.join(tempDirectory, "document.typ");
-  const pdfPath = outputPath ?? path.join(tempDirectory, "preview.pdf");
+  const svgPath = path.join(tempDirectory, "preview-{p}.svg");
+  try {
+    await writeFile(inputPath, source, "utf8");
+    await execFileAsync("typst", [
+      "compile",
+      "--format",
+      "svg",
+      "--root",
+      tempDirectory,
+      inputPath,
+      svgPath,
+    ]);
+    const pageNames = (await readdir(tempDirectory))
+      .filter((name) => /^preview-\d+\.svg$/.test(name))
+      .sort(
+        (left, right) =>
+          Number(left.match(/\d+/)?.[0]) - Number(right.match(/\d+/)?.[0]),
+      );
+    return await Promise.all(
+      pageNames.map(async (name) =>
+        (await readFile(path.join(tempDirectory, name))).toString("base64"),
+      ),
+    );
+  } finally {
+    await rm(tempDirectory, { recursive: true, force: true });
+  }
+}
+
+async function compileTypstPdf(source: string, outputPath: string) {
+  const tempDirectory = await mkdtemp(
+    path.join(app.getPath("temp"), "blocks-typst-"),
+  );
+  const inputPath = path.join(tempDirectory, "document.typ");
   try {
     await writeFile(inputPath, source, "utf8");
     await execFileAsync("typst", [
@@ -257,9 +289,8 @@ async function compileTypst(source: string, outputPath?: string) {
       "--root",
       tempDirectory,
       inputPath,
-      pdfPath,
+      outputPath,
     ]);
-    return await readFile(pdfPath);
   } finally {
     await rm(tempDirectory, { recursive: true, force: true });
   }

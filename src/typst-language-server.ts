@@ -37,8 +37,40 @@ type CompletionItem = {
   kind?: number;
   insertText?: string;
   insertTextFormat?: number;
-  textEdit?: { newText?: string };
+  textEdit?: CompletionTextEdit;
+  additionalTextEdits?: CompletionTextEdit[];
 };
+type CompletionTextEdit = {
+  newText?: string;
+  range?: {
+    start: { line: number; character: number };
+    end: { line: number; character: number };
+  };
+};
+
+function expandSnippet(snippet: string) {
+  const tabStops: { index: number; offset: number }[] = [];
+  let text = snippet.replace(
+    /\$\{(\d+):([^}]*)\}/g,
+    (_match, index: string, placeholder: string, offset: number) => {
+      tabStops.push({ index: Number(index), offset });
+      return placeholder;
+    },
+  );
+  text = text.replace(
+    /\$\{(\d+)\}|\$(\d+)/g,
+    (_match, braced: string | undefined, plain: string | undefined, offset) => {
+      tabStops.push({ index: Number(braced ?? plain), offset });
+      return "";
+    },
+  );
+  const first =
+    tabStops
+      .filter(({ index }) => index > 0)
+      .sort((left, right) => left.index - right.index)[0] ??
+    tabStops.find(({ index }) => index === 0);
+  return { text, cursorOffset: first?.offset ?? text.length };
+}
 
 export class TypstLanguageServer {
   private process: ChildProcessWithoutNullStreams | undefined;
@@ -109,18 +141,33 @@ export class TypstLanguageServer {
           if (!item.label) return [];
           const rawInsertText =
             item.textEdit?.newText ?? item.insertText ?? item.label;
-          const insertText =
+          const expanded =
             item.insertTextFormat === 2
-              ? rawInsertText
-                  .replace(/\$\{\d+:([^}]*)\}/g, "$1")
-                  .replace(/\$\d+/g, "")
-              : rawInsertText;
+              ? expandSnippet(rawInsertText)
+              : { text: rawInsertText, cursorOffset: rawInsertText.length };
+          const edits = item.textEdit?.range
+            ? [
+                {
+                  range: item.textEdit.range,
+                  newText: expanded.text,
+                  cursorOffset: expanded.cursorOffset,
+                  primary: true,
+                },
+                ...(item.additionalTextEdits ?? []).flatMap((edit) =>
+                  edit.range
+                    ? [{ range: edit.range, newText: edit.newText ?? "" }]
+                    : [],
+                ),
+              ]
+            : undefined;
           return [
             {
               label: item.label,
               detail: item.detail,
               kind: item.kind,
-              insertText,
+              insertText: expanded.text,
+              cursorOffset: expanded.cursorOffset,
+              edits,
             },
           ];
         })
