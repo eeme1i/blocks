@@ -1,5 +1,6 @@
 import { Index, Show, createSignal, onCleanup, onMount } from "solid-js";
 import {
+  blockLabel,
   type Point,
   type Size,
   alternativePosition,
@@ -8,6 +9,7 @@ import {
   primarySize,
 } from "../model/document";
 import type { WriterState } from "../state/writer";
+import { ImageBlock } from "./ImageBlock";
 import { localTypstHighlights, TypstEditor } from "./TypstText";
 
 type BoardView = Point & { scale: number };
@@ -41,6 +43,16 @@ export function Board(props: { writer: WriterState }) {
     const canvas = canvasElement;
     if (!canvas) return;
     canvas.addEventListener("wheel", wheelBoard, { passive: false });
+    const pasteImages = (event: ClipboardEvent) => {
+      const files = Array.from(event.clipboardData?.files ?? []).filter(
+        (file) => file.type.startsWith("image/"),
+      );
+      if (files.length) {
+        event.preventDefault();
+        void props.writer.importImages(files);
+      }
+    };
+    window.addEventListener("paste", pasteImages);
     const moveInteraction = (event: PointerEvent) => {
       if (nodeDrag) dragNode(event);
       else if (nodeResize) resizeNode(event);
@@ -57,6 +69,7 @@ export function Board(props: { writer: WriterState }) {
     window.addEventListener("pointercancel", endInteraction);
     window.addEventListener("blur", endInteraction);
     onCleanup(() => {
+      window.removeEventListener("paste", pasteImages);
       canvas.removeEventListener("wheel", wheelBoard);
       window.removeEventListener("pointermove", moveInteraction);
       window.removeEventListener("pointerup", endInteraction);
@@ -76,7 +89,8 @@ export function Board(props: { writer: WriterState }) {
 
   function beginBoardPan(event: PointerEvent) {
     const target = event.target as HTMLElement;
-    if (target.closest(".node, button, textarea")) return;
+    if (target.closest(".node, button, textarea, input, select, summary"))
+      return;
     event.preventDefault();
     const position = view();
     boardDrag = {
@@ -110,7 +124,12 @@ export function Board(props: { writer: WriterState }) {
     alternativeId: string | undefined,
     position: Point,
   ) {
-    if ((event.target as HTMLElement).closest("textarea, button")) return;
+    if (
+      (event.target as HTMLElement).closest(
+        "textarea, input, button, select, summary, label, .image-block-editor",
+      )
+    )
+      return;
     event.stopPropagation();
     nodeDrag = {
       primaryId,
@@ -219,6 +238,13 @@ export function Board(props: { writer: WriterState }) {
 
   function wheelBoard(event: WheelEvent) {
     if (
+      !event.ctrlKey &&
+      !event.metaKey &&
+      event.target instanceof Element &&
+      event.target.closest(".image-block-editor")
+    )
+      return;
+    if (
       event.target instanceof Element &&
       event.target.closest(".autocomplete-menu")
     )
@@ -315,6 +341,14 @@ export function Board(props: { writer: WriterState }) {
     <section
       class="canvas-panel"
       ref={canvasElement}
+      onDragOver={(event) => {
+        if (event.dataTransfer?.types.includes("Files")) event.preventDefault();
+      }}
+      onDrop={(event) => {
+        event.preventDefault();
+        const files = Array.from(event.dataTransfer?.files ?? []);
+        void props.writer.importImages(files);
+      }}
       onPointerDown={beginBoardPan}
       onPointerMove={panBoard}
       onPointerUp={endBoardPan}
@@ -396,7 +430,9 @@ export function Board(props: { writer: WriterState }) {
                     }
                   >
                     <div class="node-header">
-                      <span class="node-label">Paragraph {index + 1}</span>
+                      <span class="node-label">
+                        {blockLabel(props.writer.document(), index)}
+                      </span>
                       <Show
                         when={
                           props.writer.diagnosticsByBlock().get(block().id)?.[0]
@@ -413,25 +449,42 @@ export function Board(props: { writer: WriterState }) {
                       </Show>
                       <span class="drag-grip">⠿</span>
                     </div>
-                    <TypstEditor
-                      ariaLabel={`Paragraph ${index + 1}`}
-                      value={block().content}
-                      highlights={
-                        props.writer.highlightsByBlock().get(block().id) ??
-                        localTypstHighlights(block().content)
+                    <Show
+                      when={block().image}
+                      fallback={
+                        <TypstEditor
+                          ariaLabel={blockLabel(props.writer.document(), index)}
+                          value={block().content}
+                          highlights={
+                            props.writer.highlightsByBlock().get(block().id) ??
+                            localTypstHighlights(block().content)
+                          }
+                          onInput={(value) =>
+                            props.writer.updateBlockContent(
+                              block().id,
+                              undefined,
+                              value,
+                            )
+                          }
+                          complete={(position) =>
+                            props.writer.completePrimary(block().id, position)
+                          }
+                          placeholder="Write a paragraph…"
+                        />
                       }
-                      onInput={(value) =>
-                        props.writer.updateBlockContent(
-                          block().id,
-                          undefined,
-                          value,
-                        )
-                      }
-                      complete={(position) =>
-                        props.writer.completePrimary(block().id, position)
-                      }
-                      placeholder="Write a paragraph…"
-                    />
+                    >
+                      <ImageBlock
+                        image={block().image!}
+                        assets={props.writer.assets()}
+                        onChange={(change) =>
+                          props.writer.updateImage(
+                            block().id,
+                            undefined,
+                            change,
+                          )
+                        }
+                      />
+                    </Show>
                     <div class="node-actions">
                       <button
                         type="button"
@@ -516,21 +569,38 @@ export function Board(props: { writer: WriterState }) {
                             <span class="node-label">Alternate</span>
                             <span class="drag-grip">⠿</span>
                           </div>
-                          <TypstEditor
-                            ariaLabel="Alternate paragraph"
-                            value={alternative().content}
-                            highlights={localTypstHighlights(
-                              alternative().content,
-                            )}
-                            onInput={(value) =>
-                              props.writer.updateBlockContent(
-                                block().id,
-                                alternative().id,
-                                value,
-                              )
+                          <Show
+                            when={alternative().image}
+                            fallback={
+                              <TypstEditor
+                                ariaLabel="Alternate paragraph"
+                                value={alternative().content}
+                                highlights={localTypstHighlights(
+                                  alternative().content,
+                                )}
+                                onInput={(value) =>
+                                  props.writer.updateBlockContent(
+                                    block().id,
+                                    alternative().id,
+                                    value,
+                                  )
+                                }
+                                placeholder="Write an alternate…"
+                              />
                             }
-                            placeholder="Write an alternate…"
-                          />
+                          >
+                            <ImageBlock
+                              image={alternative().image!}
+                              assets={props.writer.assets()}
+                              onChange={(change) =>
+                                props.writer.updateImage(
+                                  block().id,
+                                  alternative().id,
+                                  change,
+                                )
+                              }
+                            />
+                          </Show>
                           <div class="node-actions">
                             <button
                               type="button"

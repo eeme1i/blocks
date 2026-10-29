@@ -1,7 +1,12 @@
 export {};
 
 declare global {
-  type OpenDocumentResult = { filePath: string; contents: string };
+  type ImageAsset = { id: string; name: string; url: string };
+  type OpenDocumentResult = {
+    filePath: string;
+    contents: string;
+    assets: ImageAsset[];
+  };
   type SaveDocumentResult = { filePath: string };
   type CompileResult =
     { ok: true; pages: string[] } | { ok: false; error: string };
@@ -48,6 +53,8 @@ declare global {
 
   interface Window {
     writer: {
+      chooseImages(): Promise<ImageAsset[]>;
+      importImage(name: string, bytes: Uint8Array): Promise<ImageAsset>;
       newWindow(): Promise<void>;
       openDocument(): Promise<OpenDocumentResult | null>;
       saveDocument(contents: string): Promise<SaveDocumentResult | null>;

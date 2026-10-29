@@ -62,12 +62,22 @@ export function createWriterState() {
   );
   let compileRequest = 0;
 
+  const [assets, setAssets] = createSignal<Record<string, ImageAsset>>({});
+
   const typstSource = createMemo(() => documentToTypst(document()));
   const activePrimary = createMemo(
     () =>
       document().blocks.find((block) => block.id === selected().primaryId) ??
       document().blocks[0],
   );
+  const activeBlock = createMemo(() => {
+    const primary = activePrimary();
+    return selected().alternativeId
+      ? primary?.alternatives.find(
+          (block) => block.id === selected().alternativeId,
+        )
+      : primary;
+  });
   const blockRanges = createMemo(() => typstBlockRanges(document()));
   const diagnosticsByBlock = createMemo(() => {
     const grouped = new Map<string, TypstDiagnostic[]>();
@@ -198,16 +208,29 @@ export function createWriterState() {
   }
 
   async function openDocument() {
-    const result = await window.writer.openDocument();
-    if (!result) return;
-    const next = parseDocument(result.contents);
-    if (next === null) {
-      showToast("Could not parse document", "error");
-    } else {
-      setDocument(next);
-      setSelected({ primaryId: next.blocks[0]?.id ?? "" });
-      setFilePath(result.filePath);
-      setPreviewPages([]);
+    try {
+      const result = await window.writer.openDocument();
+      if (!result) return;
+      const next = parseDocument(result.contents);
+      if (next === null) {
+        showToast("Could not parse document", "error");
+      } else {
+        setAssets(
+          Object.fromEntries(result.assets.map((asset) => [asset.id, asset])),
+        );
+        setDocument(next);
+        setSelected({ primaryId: next.blocks[0]?.id ?? "" });
+        setFilePath(result.filePath);
+        ++compileRequest;
+        setPreviewPages([]);
+        setPreviewError("");
+        setPreviewState("idle");
+      }
+    } catch (error) {
+      showToast(
+        error instanceof Error ? error.message : "Could not open document",
+        "error",
+      );
     }
   }
 
@@ -241,6 +264,85 @@ export function createWriterState() {
         "error",
       );
     }
+  }
+
+  function insertImage(asset: ImageAsset, alternativeOf?: string) {
+    setAssets((current) => ({ ...current, [asset.id]: asset }));
+    const next = createBlock();
+    next.image = {
+      assetId: asset.id,
+      caption: "",
+      alt: "",
+      width: 100,
+      figure: false,
+    };
+    next.size = alternativeOf
+      ? { width: 250, height: 140 }
+      : { width: 320, height: 200 };
+    if (alternativeOf) {
+      setDocument((current) => {
+        const primary = getPrimary(current, alternativeOf);
+        return primary
+          ? replacePrimary(current, alternativeOf, {
+              ...primary,
+              alternatives: [...primary.alternatives, next],
+            })
+          : current;
+      });
+      setSelected({ primaryId: alternativeOf, alternativeId: next.id });
+    } else {
+      setDocument((current) => {
+        const index =
+          current.blocks.findIndex(
+            (block) => block.id === selected().primaryId,
+          ) + 1;
+        return {
+          ...current,
+          blocks: [
+            ...current.blocks.slice(0, index),
+            next,
+            ...current.blocks.slice(index),
+          ],
+        };
+      });
+      setSelected({ primaryId: next.id });
+    }
+  }
+
+  async function chooseImages(alternativeOf?: string) {
+    try {
+      for (const asset of await window.writer.chooseImages())
+        insertImage(asset, alternativeOf);
+    } catch (error) {
+      showToast(String(error), "error");
+    }
+  }
+
+  async function importImages(files: File[]) {
+    try {
+      for (const file of files) {
+        if (file.size > 50 * 1024 * 1024)
+          throw new Error("Choose an image smaller than 50 MB.");
+        const asset = await window.writer.importImage(
+          file.name,
+          new Uint8Array(await file.arrayBuffer()),
+        );
+        insertImage(asset);
+      }
+    } catch (error) {
+      showToast(String(error), "error");
+    }
+  }
+
+  function updateImage(
+    primaryId: string,
+    alternativeId: string | undefined,
+    change: Partial<NonNullable<Block["image"]>>,
+  ) {
+    updateBlock(primaryId, alternativeId, (block) => ({
+      ...block,
+      image: block.image ? { ...block.image, ...change } : undefined,
+    }));
   }
 
   function addPrimary(afterId?: string) {
@@ -286,6 +388,10 @@ export function createWriterState() {
   }
 
   function addAlternative(primaryId: string) {
+    if (getPrimary(document(), primaryId)?.image) {
+      void chooseImages(primaryId);
+      return;
+    }
     const alternative = createBlock("A different version of this paragraph.");
     setDocument((current) => {
       const primary = getPrimary(current, primaryId);
@@ -545,6 +651,11 @@ export function createWriterState() {
 
   return {
     document,
+    assets,
+    activeBlock,
+    chooseImages,
+    importImages,
+    updateImage,
     filePath,
     selected,
     setSelected,

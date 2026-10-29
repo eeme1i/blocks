@@ -57,6 +57,13 @@ export function Toolbar(props: { writer: WriterState }) {
         <button
           type="button"
           class="quiet add-compact"
+          onClick={() => void props.writer.chooseImages()}
+        >
+          + Image
+        </button>
+        <button
+          type="button"
+          class="quiet add-compact"
           onClick={() =>
             props.writer.addPrimary(props.writer.activePrimary()?.id)
           }

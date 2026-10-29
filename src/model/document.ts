@@ -1,9 +1,43 @@
 export type Point = { x: number; y: number };
 export type Size = { width: number; height: number };
 
+export const imageParameterNames = [
+  "format",
+  "width",
+  "height",
+  "alt",
+  "page",
+  "fit",
+  "scaling",
+  "icc",
+] as const;
+export type ImageParameter = (typeof imageParameterNames)[number];
+export const figureParameterNames = [
+  "placement",
+  "scope",
+  "kind",
+  "supplement",
+  "numbering",
+  "gap",
+  "outlined",
+] as const;
+export type FigureParameter = (typeof figureParameterNames)[number];
+export type ImageSettings = {
+  assetId: string;
+  caption: string;
+  alt: string;
+  width: number;
+  source?: string;
+  parameters?: Partial<Record<ImageParameter, string>>;
+  figure?: boolean;
+  label?: string;
+  figureParameters?: Partial<Record<FigureParameter, string>>;
+};
+
 export type Block = {
   id: string;
   content: string;
+  image?: ImageSettings;
   alternatives: Block[];
   position?: Point;
   size?: Size;
@@ -138,10 +172,61 @@ export function serializeDocument(document: BlocksDocument) {
   return `${JSON.stringify(document, null, 2)}\n`;
 }
 
+export function imageParameterValue(
+  image: ImageSettings,
+  name: ImageParameter,
+): string {
+  if (image.parameters?.[name]?.trim()) return image.parameters[name]!;
+  if (name === "width") return `${Math.max(1, Math.min(100, image.width))}%`;
+  if (name === "alt") return image.alt ? JSON.stringify(image.alt) : "none";
+  return {
+    format: "auto",
+    height: "auto",
+    page: "1",
+    fit: '"cover"',
+    scaling: "auto",
+    icc: "auto",
+  }[name];
+}
+
+export function blockLabel(document: BlocksDocument, index: number): string {
+  const image = !!document.blocks[index]?.image;
+  const number = document.blocks
+    .slice(0, index + 1)
+    .filter((block) => !!block.image === image).length;
+  return `${image ? "Image" : "Paragraph"} ${number}`;
+}
+
+export function blockToTypst(block: Block): string {
+  if (!block.image) return block.content.trim();
+  const settings = block.image;
+  const source =
+    settings.source?.trim() || JSON.stringify(`assets/${settings.assetId}`);
+  const parameters = imageParameterNames
+    .filter(
+      (name) =>
+        name === "width" ||
+        name === "alt" ||
+        settings.parameters?.[name]?.trim(),
+    )
+    .map((name) => `${name}: ${imageParameterValue(settings, name)}`);
+  const image = `image(${[source, ...parameters].join(", ")})`;
+  if (!(settings.figure ?? !!settings.caption.trim())) return `#${image}`;
+  const figureParameters = figureParameterNames
+    .filter((name) => settings.figureParameters?.[name]?.trim())
+    .map((name) => `${name}: ${settings.figureParameters![name]}`);
+  if (settings.caption.trim())
+    figureParameters.unshift(
+      `caption: [#text(${JSON.stringify(settings.caption)})]`,
+    );
+  const label = settings.label?.trim()
+    ? `#label(${JSON.stringify(settings.label.trim())})`
+    : "";
+  return `#figure(${[image, ...figureParameters].join(", ")})${label}`;
+}
+
 export function documentToTypst(document: BlocksDocument) {
-  const body = document.blocks
-    .map((block) => block.content.trim())
-    .join("\n\n");
+  const body = document.blocks.map(blockToTypst).join("\n\n");
   return `${TYPST_HEADER}\n\n${body}`.trimEnd() + "\n";
 }
 
@@ -156,9 +241,10 @@ export type TypstBlockRange = {
 export function typstBlockRanges(document: BlocksDocument): TypstBlockRange[] {
   let line = TYPST_HEADER.split("\n").length + 1;
   return document.blocks.map((block) => {
-    const trimmed = block.content.trim();
+    const trimmed = blockToTypst(block);
     const lineCount = trimmed.split("\n").length;
-    const leadingLength = trimmed ? block.content.indexOf(trimmed) : 0;
+    const leadingLength =
+      !block.image && trimmed ? block.content.indexOf(trimmed) : 0;
     const leading = block.content.slice(0, leadingLength);
     const localStartLine = leading.split("\n").length - 1;
     const lastLeadingNewline = leading.lastIndexOf("\n");

@@ -88,13 +88,14 @@ export class TypstLanguageServer {
 
   constructor(private readonly emit: (event: LanguageServerEvent) => void) {}
 
-  async sync(source: string) {
+  async sync(source: string, prepare?: (directory: string) => Promise<void>) {
     try {
       await this.start();
       if (!this.process || !this.documentPath || !this.documentUri) {
         return { available: false as const };
       }
 
+      if (prepare && this.directory) await prepare(this.directory);
       await writeFile(this.documentPath, source, "utf8");
       this.version += 1;
       if (!this.opened) {

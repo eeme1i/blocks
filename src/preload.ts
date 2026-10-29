@@ -1,6 +1,9 @@
 import { contextBridge, ipcRenderer } from "electron";
 
 contextBridge.exposeInMainWorld("writer", {
+  chooseImages: () => ipcRenderer.invoke("image:choose"),
+  importImage: (name: string, bytes: Uint8Array) =>
+    ipcRenderer.invoke("image:import", name, bytes),
   newWindow: () => ipcRenderer.invoke("window:new"),
   openDocument: () => ipcRenderer.invoke("document:open"),
   saveDocument: (contents: string) =>

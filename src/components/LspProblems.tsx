@@ -1,4 +1,5 @@
 import { For, Show } from "solid-js";
+import { blockLabel } from "../model/document";
 import type { WriterState } from "../state/writer";
 
 export function LspProblems(props: { writer: WriterState }) {
@@ -33,7 +34,7 @@ export function LspProblems(props: { writer: WriterState }) {
                 <div>
                   <small>
                     {entry.blockIndex >= 0
-                      ? `Paragraph ${entry.blockIndex + 1}`
+                      ? blockLabel(props.writer.document(), entry.blockIndex)
                       : "Generated document"}{" "}
                     · line {entry.displayLine}
                   </small>

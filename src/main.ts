@@ -2,10 +2,18 @@ import { app, BrowserWindow, dialog, ipcMain, Menu } from "electron";
 import type { MenuItemConstructorOptions, WebContents } from "electron";
 import path from "node:path";
 import started from "electron-squirrel-startup";
-import { mkdtemp, readFile, readdir, rm, writeFile } from "fs/promises";
+import { mkdtemp, readFile, readdir, rm, stat, writeFile } from "fs/promises";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { TypstLanguageServer } from "./typst-language-server";
+import {
+  type AssetStore,
+  importAsset,
+  publicAsset,
+  readDocumentBundle,
+  writeAssets,
+  writeDocumentBundle,
+} from "./assets";
 import { tinymistExecutable } from "./tinymist";
 
 // Handle creating/removing shortcuts on Windows when installing/uninstalling.
@@ -16,6 +24,7 @@ if (started) {
 const execFileAsync = promisify(execFile);
 type WindowContext = {
   filePath: string | null;
+  assets: AssetStore;
   typstLanguageServer: TypstLanguageServer;
 };
 const windowContexts = new Map<number, WindowContext>();
@@ -38,6 +47,7 @@ const createWindow = () => {
 
   const context: WindowContext = {
     filePath: null,
+    assets: new Map(),
     typstLanguageServer: new TypstLanguageServer((event) => {
       if (!mainWindow.isDestroyed())
         mainWindow.webContents.send("typst:lsp-event", event);
@@ -114,6 +124,33 @@ function installApplicationMenu() {
 }
 
 function registerDocumentHandlers() {
+  ipcMain.handle("image:import", (event, name: unknown, bytes: unknown) => {
+    if (typeof name !== "string" || !(bytes instanceof Uint8Array))
+      throw new TypeError("Invalid image import");
+    return publicAsset(
+      importAsset(contextFor(event.sender).assets, name, bytes),
+    );
+  });
+  ipcMain.handle("image:choose", async (event) => {
+    const owner = BrowserWindow.fromWebContents(event.sender);
+    if (!owner) throw new Error("This window is no longer available");
+    const result = await dialog.showOpenDialog(owner, {
+      properties: ["openFile", "multiSelections"],
+      filters: [
+        { name: "Images", extensions: ["png", "jpg", "jpeg", "gif", "webp"] },
+      ],
+    });
+    if (result.canceled) return [];
+    const store = contextFor(event.sender).assets;
+    return Promise.all(
+      result.filePaths.map(async (file) => {
+        if ((await stat(file)).size > 50 * 1024 * 1024)
+          throw new Error("Choose an image smaller than 50 MB.");
+        const bytes = await readFile(file);
+        return publicAsset(importAsset(store, path.basename(file), bytes));
+      }),
+    );
+  });
   ipcMain.handle("window:new", () => {
     createWindow();
   });
@@ -122,7 +159,7 @@ function registerDocumentHandlers() {
     const owner = BrowserWindow.fromWebContents(event.sender);
     if (!owner) throw new Error("This window is no longer available");
     const result = await dialog.showOpenDialog(owner, {
-      properties: ["openFile"],
+      properties: ["openFile", "openDirectory"],
 
       filters: [
         {
@@ -138,13 +175,15 @@ function registerDocumentHandlers() {
 
     const filePath = result.filePaths[0];
 
-    const contents = await readFile(filePath, "utf-8");
+    const { contents, store } = await readDocumentBundle(filePath);
+    contextFor(event.sender).assets = store;
     contextFor(event.sender).filePath = filePath;
     owner.setTitle(`${path.basename(filePath)} — blocks`);
 
     return {
       filePath,
       contents,
+      assets: [...store.values()].map(publicAsset),
     };
   });
 
@@ -158,7 +197,7 @@ function registerDocumentHandlers() {
       return saveAs(event.sender, contents);
     }
 
-    await writeFile(context.filePath, contents, "utf8");
+    await writeDocumentBundle(context.filePath, contents, context.assets);
     BrowserWindow.fromWebContents(event.sender)?.setTitle(
       `${path.basename(context.filePath)} — blocks`,
     );
@@ -176,11 +215,14 @@ function registerDocumentHandlers() {
     return saveAs(event.sender, contents);
   });
 
-  ipcMain.handle("typst:compile", async (_event, source: unknown) => {
+  ipcMain.handle("typst:compile", async (event, source: unknown) => {
     if (typeof source !== "string")
       throw new TypeError("Typst source must be a string");
     try {
-      const pages = await compileTypstSvg(source);
+      const pages = await compileTypstSvg(
+        source,
+        contextFor(event.sender).assets,
+      );
       return { ok: true, pages };
     } catch (error) {
       return { ok: false, error: formatTypstError(error) };
@@ -190,7 +232,10 @@ function registerDocumentHandlers() {
   ipcMain.handle("typst:lsp-sync", async (event, source: unknown) => {
     if (typeof source !== "string")
       throw new TypeError("Typst source must be a string");
-    return contextFor(event.sender).typstLanguageServer.sync(source);
+    const context = contextFor(event.sender);
+    return context.typstLanguageServer.sync(source, (directory) =>
+      writeAssets(directory, context.assets),
+    );
   });
 
   ipcMain.handle(
@@ -203,11 +248,11 @@ function registerDocumentHandlers() {
       ) {
         throw new TypeError("Invalid Typst completion request");
       }
-      return contextFor(event.sender).typstLanguageServer.complete(
-        source,
-        line,
-        character,
+      const context = contextFor(event.sender);
+      await context.typstLanguageServer.sync(source, (directory) =>
+        writeAssets(directory, context.assets),
       );
+      return context.typstLanguageServer.complete(source, line, character);
     },
   );
 
@@ -223,7 +268,11 @@ function registerDocumentHandlers() {
     if (result.canceled || !result.filePath)
       return { ok: false, canceled: true, error: "" };
     try {
-      await compileTypstPdf(source, result.filePath);
+      await compileTypstPdf(
+        source,
+        result.filePath,
+        contextFor(event.sender).assets,
+      );
       return { ok: true, filePath: result.filePath };
     } catch (error) {
       return { ok: false, canceled: false, error: formatTypstError(error) };
@@ -240,18 +289,23 @@ function registerDocumentHandlers() {
       filters: [{ name: "Typst source", extensions: ["typ"] }],
     });
     if (result.canceled || !result.filePath) return null;
+    await writeAssets(
+      path.dirname(result.filePath),
+      contextFor(event.sender).assets,
+    );
     await writeFile(result.filePath, source, "utf8");
     return { filePath: result.filePath };
   });
 }
 
-async function compileTypstSvg(source: string) {
+async function compileTypstSvg(source: string, assets: AssetStore) {
   const tempDirectory = await mkdtemp(
     path.join(app.getPath("temp"), "blocks-typst-"),
   );
   const inputPath = path.join(tempDirectory, "document.typ");
   const svgPath = path.join(tempDirectory, "preview-{p}.svg");
   try {
+    await writeAssets(tempDirectory, assets);
     await writeFile(inputPath, source, "utf8");
     await execFileAsync(tinymistExecutable(), [
       "compile",
@@ -278,12 +332,17 @@ async function compileTypstSvg(source: string) {
   }
 }
 
-async function compileTypstPdf(source: string, outputPath: string) {
+async function compileTypstPdf(
+  source: string,
+  outputPath: string,
+  assets: AssetStore,
+) {
   const tempDirectory = await mkdtemp(
     path.join(app.getPath("temp"), "blocks-typst-"),
   );
   const inputPath = path.join(tempDirectory, "document.typ");
   try {
+    await writeAssets(tempDirectory, assets);
     await writeFile(inputPath, source, "utf8");
     await execFileAsync(tinymistExecutable(), [
       "compile",
@@ -326,7 +385,11 @@ async function saveAs(webContents: WebContents, contents: string) {
     return null;
   }
 
-  await writeFile(result.filePath, contents, "utf8");
+  await writeDocumentBundle(
+    result.filePath,
+    contents,
+    contextFor(webContents).assets,
+  );
 
   contextFor(webContents).filePath = result.filePath;
   owner.setTitle(`${path.basename(result.filePath)} — blocks`);
